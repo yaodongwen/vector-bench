@@ -9,11 +9,11 @@ from tqdm import tqdm
 VECTOR_DB_ROOT = "results/vector_databases_spider"
 
 # Path to the original schema file, used for reference
-ORIGINAL_SCHEMA_PATH = "results/embedding_after_add_description_tables.json"
+ORIGINAL_SCHEMA_PATH = "results/spider_json/embedding_after_add_description_tables_spider.json"
 
 # The name of the output file you want to create
 OUTPUT_DIR = "./results"
-OUTPUT_JSON_PATH = "new_embedding_after_add_description_tables.json"
+OUTPUT_JSON_PATH = "spider_json/new_embedding_after_add_description_tables_spider.json"
 
 def generate_schema_for_db(db_id, db_path, original_schema):
     """

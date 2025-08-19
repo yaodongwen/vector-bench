@@ -1,5 +1,3 @@
-# batch_vectorize_databases.py (恢复进度条优化版)
-
 import os
 import sys
 import logging
@@ -8,75 +6,93 @@ import torch
 from sentence_transformers import SentenceTransformer
 import torchvision
 
-# 屏蔽 torchvision 的 Beta 版本警告
+# --- Early Setup: Logging Configuration ---
+# Create logging directory if it doesn't exist
+os.makedirs("logging", exist_ok=True)
+
+# Configure logging to write to a file, overwriting it on each run (filemode='w')
+# All print statements will be replaced by logging calls, so they go to this file.
+# The tqdm progress bar, which prints to stderr by default, will remain on the console.
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='logging/out.log',
+    filemode='w'
+)
+
+# --- Main Application ---
+
+# Shield against torchvision Beta version warning
 torchvision.disable_beta_transforms_warning()
 
 try:
     from vector_database_generate import generate_database_script, build_vector_database
 except ImportError as e:
-    print(f"✖ Import Error: {e}")
+    # Log critical error and exit if essential modules are missing
+    logging.critical(f"Import Error: {e}. Please ensure vector_database_generate.py is accessible.")
     sys.exit(1)
 
 # --- Configuration ---
 SOURCE_DB_ROOT = "spider_data/database"
-SQL_SCRIPT_DIR = "results/vector_sql_spider"
-VECTOR_DB_ROOT = "results/vector_databases_spider"
-TABLE_JSON_PATH = "./results/embedding_after_add_description_tables.json"
+SQL_SCRIPT_DIR = "results/vector_sql_spider1"
+VECTOR_DB_ROOT = "results/vector_databases_spider1"
+TABLE_JSON_PATH = "./results/spider_json/embedding_after_add_description_tables_spider.json"
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
 model_path = '/mnt/b_public/data/yaodongwen/model'
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set environment variable for Hugging Face model download mirror
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
 
 def main():
     """
     Main function to orchestrate the batch vectorization of databases.
+    All standard output is redirected to 'logging/out.log', only progress bars are shown in console.
     """
-    print("--- Starting Batch Database Vectorization ---")
+    logging.info("--- Starting Batch Database Vectorization ---")
     os.makedirs(SQL_SCRIPT_DIR, exist_ok=True)
     os.makedirs(VECTOR_DB_ROOT, exist_ok=True)
     logging.info(f"Intermediate SQL scripts will be saved to: {SQL_SCRIPT_DIR}")
     logging.info(f"Final vector databases will be saved to: {VECTOR_DB_ROOT}")
 
     if not os.path.exists(TABLE_JSON_PATH):
-        logging.error(f"✖ Critical Error: The table info file was not found at '{TABLE_JSON_PATH}'")
+        logging.error(f"Critical Error: The table info file was not found at '{TABLE_JSON_PATH}'")
         return
 
     model = None
     pool = None
     try:
-        print(f"\nLoading embedding model: '{EMBEDDING_MODEL_NAME}'...")
+        logging.info(f"Loading embedding model: '{EMBEDDING_MODEL_NAME}'...")
         model = SentenceTransformer(
             EMBEDDING_MODEL_NAME,
             device='cpu',
             cache_folder=model_path
         )
-        print("✔ Embedding model loaded to CPU memory.")
+        logging.info("Embedding model loaded to CPU memory.")
 
         if torch.cuda.is_available():
             gpu_count = torch.cuda.device_count()
             target_devices = [f'cuda:{i}' for i in range(gpu_count)]
-            print(f"✔ 成功识别到 {gpu_count} 张沐曦GPU。")
-            print(f"  准备在以下设备上启动多进程池: {target_devices}")
+            logging.info(f"Successfully identified {gpu_count} CUDA-enabled GPU(s).")
+            logging.info(f"Preparing to start multi-process pool on devices: {target_devices}")
             pool = model.start_multi_process_pool(target_devices=target_devices)
-            print("✔ Multi-GPU process pool started successfully.")
+            logging.info("Multi-GPU process pool started successfully.")
         else:
-            print("⚠️ 未能识别到沐曦GPU，将以单进程CPU模式运行。")
+            logging.warning("No CUDA-enabled GPU detected. Running in single-process CPU mode.")
 
         try:
             db_ids = [name for name in os.listdir(SOURCE_DB_ROOT) if os.path.isdir(os.path.join(SOURCE_DB_ROOT, name))]
             if not db_ids:
-                logging.error(f"✖ No databases found in the source directory: {SOURCE_DB_ROOT}")
+                logging.error(f"No databases found in the source directory: {SOURCE_DB_ROOT}")
                 return
         except FileNotFoundError:
-            logging.error(f"✖ Source database directory not found: {SOURCE_DB_ROOT}")
+            logging.error(f"Source database directory not found: {SOURCE_DB_ROOT}")
             return
             
-        print(f"\nFound {len(db_ids)} databases to process.")
+        logging.info(f"Found {len(db_ids)} databases to process.")
 
-        # 这个总进度条保持不变
-        for db_id in tqdm(db_ids, desc="Overall Progress", unit="db", position=0):
+        # This main progress bar will be visible in the console
+        for db_id in tqdm(db_ids, desc="Overall Progress", unit="db", position=0, file=sys.stdout):
             logging.info(f"--- Processing database: {db_id} ---")
 
             source_db_path = os.path.join(SOURCE_DB_ROOT, db_id, f"{db_id}.sqlite")
@@ -87,7 +103,7 @@ def main():
             final_db_path = os.path.join(final_db_dir, f"{db_id}.sqlite")
 
             if not os.path.exists(source_db_path):
-                logging.warning(f"⚠️ Skipping '{db_id}': Source file not found at '{source_db_path}'")
+                logging.warning(f"Skipping '{db_id}': Source file not found at '{source_db_path}'")
                 continue
 
             try:
@@ -99,28 +115,28 @@ def main():
                     pool=pool,
                     table_json_path=TABLE_JSON_PATH
                 )
-                logging.info(f"✔ Successfully generated SQL script: {sql_script_path}")
+                logging.info(f"Successfully generated SQL script: {sql_script_path}")
 
                 logging.info(f"Step 2/2: Building vector database for '{db_id}'...")
                 build_vector_database(
                     SQL_FILE=sql_script_path,
                     DB_FILE=final_db_path
                 )
-                logging.info(f"✔ Successfully created vector database: {final_db_path}")
+                logging.info(f"Successfully created vector database: {final_db_path}")
 
             except Exception as e:
-                logging.error(f"✖ An error occurred while processing '{db_id}': {e}", exc_info=True)
+                logging.error(f"An error occurred while processing '{db_id}': {e}", exc_info=True)
                 continue
 
-        print("\n--- Batch Vectorization Process Completed ---")
+        logging.info("--- Batch Vectorization Process Completed ---")
 
     except Exception as e:
-        logging.error(f"✖ A critical error occurred in the main process. Error: {e}", exc_info=True)
+        logging.critical(f"A critical error occurred in the main process. Error: {e}", exc_info=True)
     finally:
         if pool:
-            print("Stopping multi-GPU process pool...")
+            logging.info("Stopping multi-GPU process pool...")
             model.stop_multi_process_pool(pool)
-            print("✔ Process pool stopped.")
+            logging.info("Process pool stopped.")
 
 if __name__ == '__main__':
     main()

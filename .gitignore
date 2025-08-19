@@ -4,7 +4,15 @@
 .env.*
 !.env.example
 
+# macOS system files
+.DS_Store
+__MACOSX/
 
+# Python cache and environment files
+__pycache__/
+*.pyc
+venv/
+env/
 
 
 # 大文件
@@ -13,4 +21,3 @@
 ./spider_data/
 ./model/
 ./cache/
-./__MACOSX/

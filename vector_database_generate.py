@@ -6,6 +6,7 @@ import traceback
 import json
 import concurrent.futures
 from tqdm import tqdm
+import logging
 from sentence_transformers import SentenceTransformer
 import sqlite_vec
 from io import StringIO
@@ -16,7 +17,23 @@ import re
 # 1. 清理标识符的辅助函数 (保持不变)
 # =================================================================
 def sanitize_identifier(identifier):
-    return identifier.replace(' ', '_').replace('(', '').replace(')', '')
+    """
+    清理并安全地引用 SQL 标识符。
+    - 替换非法字符
+    - 如果以数字开头，则添加下划线前缀
+    - 用双引号包裹最终结果
+    """
+    # 替换空格和括号
+    s = identifier.replace(' ', '_').replace('(', '').replace(')', '')
+    # 替换其他可能导致问题的特殊字符，如 % / -
+    # s = re.sub(r'[^a-zA-Z0-9_]', '_', s)
+    # 如果标识符以数字开头，添加前缀
+    if re.match(r'^\d', s):
+        s = 'new_' + s
+    # 检查是否为 sqlite-vec 的保留关键字 'distance'
+    if s.lower() == 'distance':
+        s = 'distance_val'  # 重命名冲突列
+    return s
 
 # =================================================================
 # 2. 生成虚拟表的函数 (保持不变)
@@ -27,16 +44,19 @@ def create_virtual_table_ddl(conn, table_name, db_info, vec_dim):
     original_columns_info = cursor.fetchall()
 
     column_definitions = []
-    unsupported_types = {'DATE', 'DATETIME', 'TIMESTAMP', 'BOOLEAN'}
+    unsupported_types = {'DATE', 'YEAR', 'DATETIME', 'TIMESTAMP', 'BOOLEAN'}
 
     for col_info in original_columns_info:
         original_col_name, original_type = col_info[1], col_info[2].upper()
         sanitized_col_name = sanitize_identifier(original_col_name)
         type_keyword = original_type.split('(')[0]
         new_type = 'TEXT' if type_keyword in unsupported_types else (original_type if original_type else 'TEXT')
-        if 'char' in new_type.lower(): new_type = 'TEXT'
-        if new_type == 'REAL': new_type = 'FLOAT'
-        if "numeric" in new_type.lower() or "decimal" in new_type.lower(): new_type = 'FLOAT'
+        if 'char' in new_type.lower() or 'bool' in new_type.lower(): 
+            new_type = 'TEXT'
+        elif new_type == 'REAL' or "numeric" in new_type.lower() or "decimal" in new_type.lower(): 
+            new_type = 'FLOAT'
+        elif "int" in new_type.lower() or "number" in new_type.lower(): 
+            new_type = 'INTEGER'
 
         column_definitions.append(f'  {sanitized_col_name} {new_type}')
 
@@ -120,7 +140,7 @@ def export_to_single_sql_file(db_path, output_file, db_info, embedding_model, po
                         ddl = sql + ';'
                 except Exception as e:
                     # 如果查询失败（虽然不太可能发生），则安全地回退到原始DDL
-                    print(f"警告：无法获取表 '{name}' 的列信息 ({e})，将使用原始表结构。")
+                    logging.info(f"警告：无法获取表 '{name}' 的列信息 ({e})，将使用原始表结构。")
                     ddl = sql + ';'
             else:
                 ddl = sql + ';'
@@ -176,8 +196,9 @@ def export_to_single_sql_file(db_path, output_file, db_info, embedding_model, po
                         if val is None:
                             if is_virtual_table and "int" in col_type: values.append("0")
                             elif is_virtual_table and "text" in col_type: values.append("''")
-                            else: values.append("NULL")
-                        elif isinstance(val, (int, float)): values.append(str(val))
+                            else: values.append("'NULL'")
+                        elif isinstance(val, int): values.append(str(int(val)))
+                        elif isinstance(val, float): values.append(str(float(val)))
                         elif isinstance(val, bytes): values.append(f"X'{val.hex()}'")
                         else: values.append("'" + str(val).replace("'", "''") + "'")
                     
@@ -213,30 +234,30 @@ def generate_database_script(db_path, output_file, embedding_model, table_json_p
         with open(table_json_path, 'r', encoding='utf-8') as f:
             db_infos = json.load(f)
     except FileNotFoundError:
-        print(f"✖ Error: JSON file not found at {table_json_path}")
+        logging.info(f"✖ Error: JSON file not found at {table_json_path}")
         return # 使用 return 代替 exit() 以便在循环中继续
     except json.JSONDecodeError:
-        print(f"✖ Error: Could not decode JSON from {table_json_path}")
+        logging.info(f"✖ Error: Could not decode JSON from {table_json_path}")
         return
 
-    # print("Loading embedding model...") # 这句可以移到主脚本
-    print(f"Exporting database to {output_file}...")
+    # logging.info("Loading embedding model...") # 这句可以移到主脚本
+    logging.info(f"Exporting database to {output_file}...")
     
     base_name = os.path.basename(db_path)
     db_id = os.path.splitext(base_name)[0]
     target_db_info = next((info for info in db_infos if info.get("db_id") == db_id), None)
     if not target_db_info:
-        print(f"✖ Error: Could not find configuration for db_id '{db_id}' in {table_json_path}")
+        logging.info(f"✖ Error: Could not find configuration for db_id '{db_id}' in {table_json_path}")
         return
 
     # 【修改点 5】: 将接收到的 pool 传递给下一层函数
     success, message = export_to_single_sql_file(db_path, output_file, target_db_info, embedding_model, pool=pool)
 
     if success:
-        # print(f"✔ {message}") # 日志可以简化
+        # logging.info(f"✔ {message}") # 日志可以简化
         pass # 主脚本会打印成功信息
     else:
-        print(f"✖ Export failed for {db_id}!\n{message}")
+        logging.info(f"✖ Export failed for {db_id}!\n{message}")
 
 # =================================================================
 # 4. 构建向量数据库的函数 (保持不变)
@@ -269,7 +290,7 @@ def process_sql_file(sql_file_path, db_path):
                         cursor.execute(statement_buffer)
                         statement_buffer = ""
                     except sqlite3.Error as e:
-                        print(f"SQL execution failed: {e}\nStatement: {statement_buffer.strip()[:1000]}...")
+                        logging.info(f"SQL execution failed: {e}\nStatement: {statement_buffer.strip()[:1000]}...")
                         raise
         if current_statement := statement_buffer.strip():
             cursor.execute(current_statement)
@@ -285,10 +306,10 @@ def build_vector_database(SQL_FILE, DB_FILE):
     try:
         import sqlite_vec
     except ImportError:
-        print("Fatal Error: 'sqlite_vec' library not installed. Please install with 'pip install sqlite-vec'")
+        logging.info("Fatal Error: 'sqlite_vec' library not installed. Please install with 'pip install sqlite-vec'")
         exit()
     try:
         process_sql_file(SQL_FILE, DB_FILE)
     except Exception as e:
-        print(f"❌ SQL import failed! {e}")
+        logging.info(f"❌ SQL import failed! {e}")
         raise
