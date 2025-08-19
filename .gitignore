@@ -1,0 +1,16 @@
+# 忽略环境变量文件
+# 这些文件通常包含敏感信息，如 API 密钥，不应该被提交到版本库
+.env
+.env.*
+!.env.example
+
+
+
+
+# 大文件
+./train/
+./results/
+./spider_data/
+./model/
+./cache/
+./__MACOSX/

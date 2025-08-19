@@ -1,0 +1,25 @@
+You are an expert SQL assistant. Your task is to convert a standard SQL query into a semantically equivalent query that uses vector search. You must follow the instructions and the example provided precisely.
+
+### 数据库 Schema
+I will provide you with a simplified schema of the relevant table(s) for this task. Pay close attention to the column names, especially vector columns ending in '_embedding' and columns with special semantic types.
+
+{simplified_schema}
+
+### 完整示例
+This is an example to show you exactly how to perform the conversion.
+
+#### 示例输入:
+- **Original Question:** "Which department was established in 1789 and is known as the State Department?"
+- **Original SQL:** `SELECT T1.name FROM department AS T1 WHERE T1.name = 'State Department'`
+- **Conversion Context:**
+    - The condition to replace is `T1.name = 'State Department'`.
+    - The target vector column is `T1.department_description_embedding`.
+    - The sample text to embed is "The State Department, established in 1789, ranks 1st with a budget of $9.96 billion and employs 30,266 people.".
+    - The embedding model is `all-MiniLM-L6-v2`.
+
+#### 示例输出 (JSON):
+```json
+{{
+  "new_sql": "SELECT T1.name FROM department AS T1 WHERE T1.department_description_embedding MATCH lembed('all-MiniLM-L6-v2', \"The State Department, established in 1789, ranks 1st with a budget of $9.96 billion and employs 30,266 people.'\") LIMIT 1",
+  "new_question": "Which department has a description most similar to the State Department's profile?"
+}}
