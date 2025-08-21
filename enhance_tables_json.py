@@ -10,6 +10,7 @@ from typing import List, Dict
 import numpy as np
 import traceback
 import base64
+from dotenv import load_dotenv
 
 def write_large_json(data: List[Dict], output_path: str, chunk_size: int = 500):
     """分块写入字典数组到 JSON 文件（避免嵌套数组）"""
@@ -196,10 +197,10 @@ def process_spider_dataset(base_dir="spider_data"):
         
     print(f"Have generated enhanced_train_tables.json in {output_path}!")
 
-def process_spider_dataset_vector(base_dir="results"):
+def process_spider_dataset_vector(base_dir, table_schema_path, databases_path, output_dir, output_schema_name):
     """处理BIRD数据集的表信息，为每个表添加描述和示例数据"""
     # 1. 加载table.json
-    table_json_path = os.path.join(base_dir, "new_embedding_after_add_description_tables.json")
+    table_json_path = os.path.join(base_dir, table_schema_path)
     if not os.path.exists(table_json_path):
         raise ValueError(f"tables.json not found for {table_json_path}")
         
@@ -210,12 +211,11 @@ def process_spider_dataset_vector(base_dir="results"):
     if not isinstance(db_infos, list):
         db_infos = [db_infos]
 
-    train_databases = os.path.join(base_dir, "vector_databases_spider")
+    train_databases = os.path.join(base_dir, databases_path)
     for db_info in db_infos:
         db_id = db_info["db_id"]
         database_dir = os.path.join(train_databases, db_id)
         database_path = os.path.join(database_dir, f"{db_id}.sqlite")
-        database_description = os.path.join(database_dir, "database_description")
 
         db_info["table_samples"] = {}
         # 写入示例数据  
@@ -261,21 +261,52 @@ def process_spider_dataset_vector(base_dir="results"):
                 print(f"  Error connecting to SQLite database: {str(e)}")
                 traceback.print_exc()
    
-    output_dir = "./results"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"目录 {output_dir} 已创建")
     else:
         print(f"目录 {output_dir} 已存在")
     
-    output_path = os.path.join(output_dir, "enhanced_new_embedding_after_add_description_tables.json")
-    write_large_json(db_infos,output_path,2000)
+    output_path = os.path.join(output_dir, output_schema_name)
+    write_large_json(db_infos, output_path, 2000)
         
     print(f"Have generated enhanced_train_tables.json in {output_path}!")
 
+def main_spider_vector():
+    # 1. 加载 .env 文件中的环境变量
+    load_dotenv()
+    print("Attempting to load configuration from .env file...")
 
+    # 2. 从环境变量中读取配置项
+    base_dir = os.getenv("BASE_DIR_ENHANCE_VECTOR")
+    table_schema_path = os.getenv("TABLE_SCHEMA_PATH_ENHANCE_VECTOR")
+    databases_path = os.getenv("DATAPATH_PATH_ENHANCE_VECTOR")
+    output_dir = os.getenv("OUTPUT_DIR_ENHANCE_VECTOR")
+    output_schema_name = os.getenv("OUTPUT_SCHEMA_NAME_ENHANCE_VECTOR")
+
+    # 3. (推荐) 检查所有变量是否都已成功加载
+    required_vars = {
+        "BASE_DIR_ENHANCE_VECTOR": base_dir,
+        "TABLE_SCHEMA_PATH_ENHANCE_VECTOR": table_schema_path,
+        "DATAPATH_PATH_ENHANCE_VECTOR": databases_path,
+        "OUTPUT_DIR_ENHANCE_VECTOR": output_dir,
+        "OUTPUT_SCHEMA_NAME_ENHANCE_VECTOR": output_schema_name
+    }
+
+    missing_vars = [key for key, value in required_vars.items() if value is None]
+    if missing_vars:
+        raise ValueError(f"错误：以下环境变量未在 .env 文件中设置，请检查: {', '.join(missing_vars)}")
+
+    print("✅ 配置加载成功！")
+    
+    # 4. 使用加载的配置作为参数来调用您的主函数
+    process_spider_dataset_vector(
+        base_dir=base_dir,
+        table_schema_path=table_schema_path,
+        databases_path=databases_path,
+        output_dir=output_dir,
+        output_schema_name=output_schema_name
+    )
 
 if __name__ == "__main__":
-    # base_directory = "./train"  # BIRD数据根目录
-    # process_bird_dataset(base_directory)
-    process_spider_dataset_vector()
+    main_spider_vector()

@@ -16,24 +16,54 @@ import re
 # =================================================================
 # 1. 清理标识符的辅助函数 (保持不变)
 # =================================================================
-def sanitize_identifier(identifier):
+def sanitize_identifier(identifier: str) -> str:
     """
     清理并安全地引用 SQL 标识符。
-    - 替换非法字符
-    - 如果以数字开头，则添加下划线前缀
-    - 用双引号包裹最终结果
+
+    处理逻辑：
+    1. 将输入转换为字符串，以防传入非字符串类型。
+    2. 替换空格、括号及其他所有非字母、非数字、非下划线的字符为下划线。
+    3. 检查清理后的标识符是否以字母开头，如果不是，则添加 'fld_' 前缀。
+    4. 检查是否为 SQLite-VEC 的保留关键字 'distance'，如果是则重命名。
+    5. 用双引号包裹最终结果，使其成为一个安全的 SQL 标识符。
     """
+    # 确保输入是字符串
+    s = str(identifier)
+    
     # 替换空格和括号
-    s = identifier.replace(' ', '_').replace('(', '').replace(')', '')
-    # 替换其他可能导致问题的特殊字符，如 % / -
-    # s = re.sub(r'[^a-zA-Z0-9_]', '_', s)
-    # 如果标识符以数字开头，添加前缀
-    if re.match(r'^\d', s):
-        s = 'new_' + s
-    # 检查是否为 sqlite-vec 的保留关键字 'distance'
+    s = s.replace(' ', '_').replace('(', '').replace(')', '')
+    
+    # 替换所有非字母、非数字、非下划线的字符为下划线
+    # 这个表达式会正确处理 Unicode 字符（如 ñ），将它们替换为 _
+    # 如果你想保留 ñ 这样的字符，可以使用 re.sub(r'[^\w]', '_', s)
+    s = re.sub(r'[^a-zA-Z0-9_]', '_', s)
+    
+    # 如果标识符不以字母开头，则添加前缀。
+    # 这样可以同时处理以数字、下划线或其他符号开头的情况。
+    if not re.match(r'^[a-zA-Z]', s):
+        s = 'fld_' + s
+        
+    # 检查是否为 sqlite-vec 的保留关键字 'distance' (不区分大小写)
     if s.lower() == 'distance':
         s = 'distance_val'  # 重命名冲突列
+
     return s
+
+# 将sqlite-vec不支持的类型变成其支持的float，integer和text
+def type_convert(original_type):
+    original_type = original_type.upper()
+    unsupported_types = {'DATE', 'YEAR', 'DATETIME', 'TIMESTAMP', 'BOOLEAN'}
+    type_keyword = original_type.split('(')[0]
+    new_type = 'TEXT'
+    if 'char' in type_keyword.lower() or 'bool' in type_keyword.lower() or type_keyword in unsupported_types: 
+        new_type = 'TEXT'
+    elif type_keyword == 'REAL' or "numeric" in type_keyword.lower() or "decimal" in type_keyword.lower(): 
+        new_type = 'FLOAT'
+    elif "int" in type_keyword.lower() or "number" in type_keyword.lower(): 
+        new_type = 'INTEGER'
+    elif "blob" in type_keyword.lower():
+        new_type = 'BLOB'
+    return new_type
 
 # =================================================================
 # 2. 生成虚拟表的函数 (保持不变)
@@ -44,19 +74,11 @@ def create_virtual_table_ddl(conn, table_name, db_info, vec_dim):
     original_columns_info = cursor.fetchall()
 
     column_definitions = []
-    unsupported_types = {'DATE', 'YEAR', 'DATETIME', 'TIMESTAMP', 'BOOLEAN'}
 
     for col_info in original_columns_info:
         original_col_name, original_type = col_info[1], col_info[2].upper()
         sanitized_col_name = sanitize_identifier(original_col_name)
-        type_keyword = original_type.split('(')[0]
-        new_type = 'TEXT' if type_keyword in unsupported_types else (original_type if original_type else 'TEXT')
-        if 'char' in new_type.lower() or 'bool' in new_type.lower(): 
-            new_type = 'TEXT'
-        elif new_type == 'REAL' or "numeric" in new_type.lower() or "decimal" in new_type.lower(): 
-            new_type = 'FLOAT'
-        elif "int" in new_type.lower() or "number" in new_type.lower(): 
-            new_type = 'INTEGER'
+        new_type = type_convert(original_type)
 
         column_definitions.append(f'  {sanitized_col_name} {new_type}')
 
@@ -192,15 +214,31 @@ def export_to_single_sql_file(db_path, output_file, db_info, embedding_model, po
                     values = []
                     for j, val in enumerate(row):
                         col_name = original_col_names[j]
-                        col_type = column_types.get(col_name, "")
-                        if val is None:
-                            if is_virtual_table and "int" in col_type: values.append("0")
-                            elif is_virtual_table and "text" in col_type: values.append("''")
+                        col_type = type_convert(column_types.get(col_name, "")).lower()
+                        if val is None or val == '' or val =='NULL' or val == 'nil' or val == 0 or val == 0.0:
+                            if "int" in col_type: values.append("0")
+                            elif "float" in col_type: values.append("0.0")
+                            elif "text" in col_type: values.append("''")
                             else: values.append("'NULL'")
-                        elif isinstance(val, int): values.append(str(int(val)))
-                        elif isinstance(val, float): values.append(str(float(val)))
-                        elif isinstance(val, bytes): values.append(f"X'{val.hex()}'")
-                        else: values.append("'" + str(val).replace("'", "''") + "'")
+                        else:
+                            try:
+                                if isinstance(val, bytes): values.append(f"X'{val.hex()}'")
+                                else:
+                                    if "float" in col_type:
+                                        # 如果是，则统一强制转换为 float 格式的字符串
+                                        values.append(str(float(val))) # 关键改动：int(582) 会变成 float(582.0)，再变成 "582.0"
+                                    elif "int" in col_type:
+                                        # 否则，它就是一个真正的整型列
+                                        values.append(str(int(val)))
+                                    elif "text" in col_type: 
+                                        values.append("'" + str(val).replace("'", "''") + "'")
+                                    else:
+                                        values.append("'" + str(val).replace("'", "''") + "'")
+                                        logging.error(f'''col_name:{col_name} col_type:{col_type}''')
+                            except Exception as e:
+                                logging.error(f"Export failed: {str(e)}\n{traceback.format_exc()}")
+                                logging.error(f'''val:{val} col_name:{col_name} col_type:{col_type}''')
+                                continue
                     
                     if is_virtual_table:
                         for col_name in embedding_col_names:
@@ -228,6 +266,7 @@ def export_to_single_sql_file(db_path, output_file, db_info, embedding_model, po
         return False, f"Export failed: {str(e)}\n{traceback.format_exc()}"
     finally:
         conn.close()
+
 # 【修改点 4】: 在函数签名中添加 pool=None，作为接收从主脚本传来 pool 的入口
 def generate_database_script(db_path, output_file, embedding_model, table_json_path="./results/embedding_train_tables.json", pool=None):
     try:
@@ -291,7 +330,8 @@ def process_sql_file(sql_file_path, db_path):
                         statement_buffer = ""
                     except sqlite3.Error as e:
                         logging.info(f"SQL execution failed: {e}\nStatement: {statement_buffer.strip()[:1000]}...")
-                        raise
+                        # raise
+                        continue
         if current_statement := statement_buffer.strip():
             cursor.execute(current_statement)
         conn.commit()

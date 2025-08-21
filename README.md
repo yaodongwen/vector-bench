@@ -42,40 +42,50 @@ python generate_vector_schema.py
 
 ## 修改sql-question问答对
 1. 筛选原始问答对： 从BIRD数据集中，筛选出那些WHERE子句对阶段一中已向量化的列进行精确文本匹配的问题-SQL对。
-2. 利用LLM进行问题重写 (Prompt Engineering)：
-    输入 (Input):
-        原始问题 (Original Question)
-        原始SQL (Original SQL)
-        作为WHERE条件的精确值 (e.g., a specific paper's title)
-        该精确值对应的描述性文本 (e.g., the paper's abstract)
-    指令 (Prompt):
-        "你是一个NL2SQL数据集增强专家。请基于以下信息，将一个精确匹配的问题改写成一个需要语义搜索的模糊问题。
-        [原则]
-        新问题必须更模糊、更概念化。
-        新问题不能包含原始的精确匹配关键词。
-        新问题查询的最终目标（SELECT部分）应与原问题保持一致。
-        新问题需要听起来自然流畅。
-        [原始信息]
-        原始问题: {original_question}
-        原始SQL: {original_sql}
-        精确匹配的值: {exact_match_value}
-        用于语义化的参考文本: {vectorized_column_text}
-        [任务]
-        请生成一个新的、符合上述原则的语义化问题。
-        请生成与新问题对应的VectorSQL查询语句。"
-3. 生成VectorSQL语法：
-LLM也需要根据指令生成对应的VectorSQL。你需要为LLM定义一个统一的VectorSQL语法模板。一个通用的语法可能如下：
-SQL
-SELECT ... FROM ... WHERE ... -- (other conditions)
-ORDER BY COSINE_SIMILARITY(table.vector_column, EMBED('semantic query text')) DESC
-LIMIT 5;
-或者使用一个更简洁的函数：
-SQL
-SELECT ... FROM VECTOR_SEARCH(
-    TABLE table,
-    COLUMN vector_column,
-    QUERY EMBED('semantic query text'),
-    TOP_K 5
-)
-WHERE ...;
-EMBED(...) 是一个示意函数，代表将引号内的文本通过嵌入模型转换为向量的过程。
+```bash
+python filter_bird.py
+```
+2. 在使用大模型修改问题-SQL对前，先增强一下schema文件，把表格的样例加进去。这样方便大模型参考样例中的描述信息，生成更高质量的描述的匹配。
+```bash
+python enhance_tables_json.py
+```
+3. 利用LLM进行问题重写 (Prompt Engineering)：
+输入 (Input):
+    原始问题 (Original Question)
+    原始SQL (Original SQL)
+    作为WHERE条件的精确值 (e.g., a specific paper's title)
+    该精确值对应的描述性文本 (e.g., the paper's abstract)
+指令 (Prompt):
+    "你是一个NL2SQL数据集增强专家。请基于以下信息，将一个精确匹配的问题改写成一个需要语义搜索的模糊问题。
+    [原则]
+    新问题必须更模糊、更概念化。
+    新问题不能包含原始的精确匹配关键词。
+    新问题查询的最终目标（SELECT部分）应与原问题保持一致。
+    新问题需要听起来自然流畅。
+    [原始信息]
+    原始问题: {original_question}
+    原始SQL: {original_sql}
+    精确匹配的值: {exact_match_value}
+    用于语义化的参考文本: {vectorized_column_text}
+    [任务]
+    请生成一个新的、符合上述原则的语义化问题。
+    请生成与新问题对应的VectorSQL查询语句。"
+生成VectorSQL语法：
+    LLM也需要根据指令生成对应的VectorSQL。你需要为LLM定义一个统一的VectorSQL语法模板。一个通用的语法可能如下：
+    SQL
+    SELECT ... FROM ... WHERE ... -- (other conditions)
+    ORDER BY COSINE_SIMILARITY(table.vector_column, EMBED('semantic query text')) DESC
+    LIMIT 5;
+    或者使用一个更简洁的函数：
+    SQL
+    SELECT ... FROM VECTOR_SEARCH(
+        TABLE table,
+        COLUMN vector_column,
+        QUERY EMBED('semantic query text'),
+        TOP_K 5
+    )
+    WHERE ...;
+    EMBED(...) 是一个示意函数，代表将引号内的文本通过嵌入模型转换为向量的过程。
+```bash
+python sql_vectorize.py
+```

@@ -3,17 +3,16 @@ import json
 import sqlite3
 import sqlite_vec  # Import the sqlite_vec library
 from tqdm import tqdm
+from dotenv import load_dotenv
 
-# --- Configuration ---
-# Directory where your final vector databases are stored
-VECTOR_DB_ROOT = "results/vector_databases_spider"
+# --- Configuration from .env ---
+load_dotenv()
 
-# Path to the original schema file, used for reference
-ORIGINAL_SCHEMA_PATH = "results/spider_json/embedding_after_add_description_tables_spider.json"
-
-# The name of the output file you want to create
-OUTPUT_DIR = "./results"
-OUTPUT_JSON_PATH = "spider_json/new_embedding_after_add_description_tables_spider.json"
+# Read the variables using os.getenv()
+VECTOR_DB_ROOT = os.getenv("VECTOR_DB_ROOT_GENERATE_SCHEMA")
+ORIGINAL_SCHEMA_PATH = os.getenv("ORIGINAL_SCHEMA_PATH")
+OUTPUT_DIR = os.getenv("OUTPUT_DIR_GENERATE_SCHEMA")
+OUTPUT_JSON_PATH = os.getenv("OUTPUT_JSON_PATH_GENERATE_SCHEMA")
 
 def generate_schema_for_db(db_id, db_path, original_schema):
     """

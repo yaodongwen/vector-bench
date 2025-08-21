@@ -33,12 +33,18 @@ except ImportError as e:
     sys.exit(1)
 
 # --- Configuration ---
-SOURCE_DB_ROOT = "spider_data/database"
-SQL_SCRIPT_DIR = "results/vector_sql_spider1"
-VECTOR_DB_ROOT = "results/vector_databases_spider1"
-TABLE_JSON_PATH = "./results/spider_json/embedding_after_add_description_tables_spider.json"
-EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
-model_path = '/mnt/b_public/data/yaodongwen/model'
+from dotenv import load_dotenv
+
+# 加载.env文件
+load_dotenv()
+
+# --- Configuration ---
+SOURCE_DB_ROOT = os.getenv("SOURCE_DB_ROOT", "spider_data/database")
+SQL_SCRIPT_DIR = os.getenv("SQL_SCRIPT_DIR", "results/vector_sql_spider1")
+VECTOR_DB_ROOT = os.getenv("VECTOR_DB_ROOT", "results/vector_databases_spider1")
+TABLE_JSON_PATH = os.getenv("TABLE_JSON_PATH", "./results/spider_json/embedding_after_add_description_tables_spider.json")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+model_path = os.getenv("model_path", "/mnt/b_public/data/yaodongwen/model")
 
 # Set environment variable for Hugging Face model download mirror
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
