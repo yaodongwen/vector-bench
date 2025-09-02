@@ -16,8 +16,19 @@ env/
 
 
 # 大文件
-./train/
-./results/
-./spider_data/
-./model/
-./cache/
+train/
+results/
+!question_synthesis/results/
+
+spider_data/
+spider2_data/
+model/
+cache/
+prompt*/
+logging/
+
+./all-MiniLM-L6-v2.e4ce9877.q8_0.gguf
+
+*.sql
+*.sqlite
+
